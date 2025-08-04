@@ -6,10 +6,11 @@ import logging
 import os
 from dotenv import load_dotenv
 
-# LangChain imports (corrected SerpAPI path)
-from langchain.utilities.serpapi import SerpAPIWrapper
+# 🛠️ Correct LangChain imports
+from langchain.utilities import SerpAPIWrapper
 from langchain.llms import OpenAI
-from langchain import PromptTemplate, LLMChain
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 # 1️⃣ Load environment variables
 load_dotenv()
@@ -22,12 +23,12 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # 4️⃣ Initialize SerpAPI and OpenAI LLM
-#    (Make sure you have `google-search-results` installed in requirements.txt)
 serp = SerpAPIWrapper(serpapi_api_key=os.getenv("SERPAPI_API_KEY"))
 llm = OpenAI(temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
 
-# 5️⃣ Query‐refinement chains
+# 5️⃣ Query‐refinement chains for the four research questions
 
+# a) Scale & urgency of the problem
 template_a = PromptTemplate(
     input_variables=["problem_text"],
     template=(
@@ -40,6 +41,7 @@ template_a = PromptTemplate(
 )
 chain_a = LLMChain(llm=llm, prompt=template_a)
 
+# b) Market addressed, size & key trends
 template_b = PromptTemplate(
     input_variables=["solution_text"],
     template=(
@@ -52,6 +54,7 @@ template_b = PromptTemplate(
 )
 chain_b = LLMChain(llm=llm, prompt=template_b)
 
+# c) Competitors & degree of novelty
 template_c = PromptTemplate(
     input_variables=["features_text"],
     template=(
@@ -64,6 +67,7 @@ template_c = PromptTemplate(
 )
 chain_c = LLMChain(llm=llm, prompt=template_c)
 
+# d) Competitor revenue streams
 template_d = PromptTemplate(
     input_variables=["features_text"],
     template=(
@@ -104,7 +108,7 @@ async def receive_form(request: Request):
     current_trl    = questions[3]["value"] if len(questions) > 3 else ""
     revenue_model  = questions[4]["value"] if len(questions) > 4 else ""
 
-    # 9️⃣ Log raw inputs
+    # 9️⃣ Log raw inputs for debugging
     logger.info("Solution      : %s", solution)
     logger.info("Problem       : %s", problem)
     logger.info("Unique Feature: %s", unique_feature)
@@ -113,17 +117,20 @@ async def receive_form(request: Request):
 
     # 🔍 a) Scale & urgency research
     if problem:
+        # 1. Refine into a search query
         query_a = chain_a.run(problem_text=problem)
         logger.info("Refined query a): %s", query_a)
+        # 2. Perform web search
         results_a = serp.run(query_a)
         logger.info("Results a): %s", results_a)
+        # 3. Draft the analysis
         analysis_a = analysis_chain_a.run(
             problem_text=problem,
             search_results=results_a
         )
         logger.info("Analysis a): %s", analysis_a)
 
-    # (You can add sections b), c), d) here similarly)
+    # (You’ll add research b), c), d) and their analyses next.)
 
     return {"status": "ok"}
 
@@ -134,6 +141,3 @@ if __name__ == "__main__":
         port=int(os.getenv("PORT", 8000)),
         log_level="info"
     )
-
-
-# d) Competitor revenue streams        "produce a search query of no more than 10 words to reliably find what revenue streams competitors generate from products "
