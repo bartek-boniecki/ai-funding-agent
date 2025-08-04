@@ -6,37 +6,47 @@ import logging
 from dotenv import load_dotenv
 import os
 
-# 1. Load environment variables from a .env file (we'll create this next)
+# Load environment variables from .env
 load_dotenv()
 
-# 2. Create the FastAPI app instance
+# Create FastAPI app
 app = FastAPI()
 
-# 3. Configure basic logging to stdout
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 4. Define the webhook endpoint that Fillout will call
 @app.post("/webhook")
 async def receive_form(request: Request):
+    """
+    Receives JSON payload from Fillout form submissions,
+    extracts the five answers by index, and logs them.
+    """
     payload = await request.json()
 
-    # 1️⃣ Grab the list of question objects
+    # Extract the list of question objects
     questions = payload.get("submission", {}).get("questions", [])
 
-    # 2️⃣ Build a simple dict: { question_name: answer_value }
-    answers = { q["name"]: q["value"] for q in questions }
+    # Safely get each answer by position
+    solution       = questions[0]["value"] if len(questions) > 0 else None
+    problem        = questions[1]["value"] if len(questions) > 1 else None
+    unique_feature = questions[2]["value"] if len(questions) > 2 else None
+    current_trl    = questions[3]["value"] if len(questions) > 3 else None
+    revenue_model  = questions[4]["value"] if len(questions) > 4 else None
 
-    # 3️⃣ Log each answer clearly
-    logger.info("Solution      : %s", answers.get("Describe your solution (<500 characters)What is the underlying tech, what it does, why it does what it does"))
-    logger.info("Problem       : %s", answers.get("What pain/problem does it solve? (<500 characters)Why is it both urgent and important"))
-    logger.info("Unique Feature: %s", answers.get("What unique features and value does it offer? (<500 characters)EIC is for tech innovations that add significant value"))
-    logger.info("Current TRL   : %s", answers.get("What technology readiness level has already been completedFor AI solutions, see TRL definitions here: https://ai-watch.ec.europa.eu/publications/ai-watch-revisiting-technology-readiness-levels-relevant-artificial-intelligence-technologies_en"))
-    logger.info("Revenue Model : %s", answers.get("What is your business and revenue model (<500 characters)How will this solution generate income"))
+    # Log each one clearly
+    logger.info("Solution      : %s", solution)
+    logger.info("Problem       : %s", problem)
+    logger.info("Unique Feature: %s", unique_feature)
+    logger.info("Current TRL   : %s", current_trl)
+    logger.info("Revenue Model : %s", revenue_model)
 
-    # 4️⃣ (For now) just return OK
     return {"status": "ok"}
 
-# 5. If you run this file directly, start the Uvicorn server
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), log_level="info")
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000)),
+        log_level="info"
+    )
