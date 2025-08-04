@@ -6,8 +6,8 @@ import logging
 import os
 from dotenv import load_dotenv
 
-# LangChain imports
-from langchain.utilities import SerpAPIWrapper
+# LangChain imports (corrected SerpAPI path)
+from langchain.utilities.serpapi import SerpAPIWrapper
 from langchain.llms import OpenAI
 from langchain import PromptTemplate, LLMChain
 
@@ -22,17 +22,17 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # 4️⃣ Initialize SerpAPI and OpenAI LLM
+#    (Make sure you have `google-search-results` installed in requirements.txt)
 serp = SerpAPIWrapper(serpapi_api_key=os.getenv("SERPAPI_API_KEY"))
 llm = OpenAI(temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
 
-# 5️⃣ Query‐refinement chains for the four research questions
+# 5️⃣ Query‐refinement chains
 
-# a) Scale & urgency of the problem
 template_a = PromptTemplate(
     input_variables=["problem_text"],
     template=(
         "You are a search query generator. Given a user‐provided problem description, "
-        "produce a keyword-focused search query of no more than 10 words to reliably find publicly available "
+        "produce a concise, keyword‐focused search query to find publicly available "
         "statistics illustrating the scale and urgency of the problem.\n\n"
         "Problem Description:\n{problem_text}\n\n"
         "Search Query:"
@@ -40,12 +40,11 @@ template_a = PromptTemplate(
 )
 chain_a = LLMChain(llm=llm, prompt=template_a)
 
-# b) Market addressed, size & key trends
 template_b = PromptTemplate(
     input_variables=["solution_text"],
     template=(
         "You are a search query generator. Given a description of a technology or product, "
-        "produce a keyword-focused search query of no more than 10 words to reliably find the market it addresses, including market size "
+        "produce a concise search query to find the market it addresses, including market size "
         "and key trends.\n\n"
         "Product/Solution Description:\n{solution_text}\n\n"
         "Search Query:"
@@ -53,12 +52,11 @@ template_b = PromptTemplate(
 )
 chain_b = LLMChain(llm=llm, prompt=template_b)
 
-# c) Competitors & degree of novelty
 template_c = PromptTemplate(
     input_variables=["features_text"],
     template=(
         "You are a search query generator. Given a list of unique features for a product, "
-        "produce a search query of no more than 10 words to reliably find companies offering similar features and assess the degree "
+        "produce a concise query to find companies offering similar features and assess the degree "
         "of novelty compared to existing solutions.\n\n"
         "Unique Features:\n{features_text}\n\n"
         "Search Query:"
@@ -66,12 +64,11 @@ template_c = PromptTemplate(
 )
 chain_c = LLMChain(llm=llm, prompt=template_c)
 
-# d) Competitor revenue streams
 template_d = PromptTemplate(
     input_variables=["features_text"],
     template=(
         "You are a search query generator. Given a list of unique features for a product, "
-        "produce a search query of no more than 10 words to reliably find what revenue streams competitors generate from products "
+        "produce a concise query to find what revenue streams competitors generate from products "
         "with similar features.\n\n"
         "Unique Features:\n{features_text}\n\n"
         "Search Query:"
@@ -100,7 +97,7 @@ async def receive_form(request: Request):
     payload = await request.json()
     questions = payload.get("submission", {}).get("questions", [])
 
-    # 8️⃣ Extract answers by index (safe defaults)
+    # 8️⃣ Extract answers by index
     solution       = questions[0]["value"] if len(questions) > 0 else ""
     problem        = questions[1]["value"] if len(questions) > 1 else ""
     unique_feature = questions[2]["value"] if len(questions) > 2 else ""
@@ -116,20 +113,17 @@ async def receive_form(request: Request):
 
     # 🔍 a) Scale & urgency research
     if problem:
-        # 1. Refine user text into a search query
         query_a = chain_a.run(problem_text=problem)
         logger.info("Refined query a): %s", query_a)
-        # 2. Perform web search
         results_a = serp.run(query_a)
         logger.info("Results a): %s", results_a)
-        # 3. Draft the analysis using search results
         analysis_a = analysis_chain_a.run(
             problem_text=problem,
             search_results=results_a
         )
         logger.info("Analysis a): %s", analysis_a)
 
-    # (Later: research b), c), d) and analyses b), c), etc.)
+    # (You can add sections b), c), d) here similarly)
 
     return {"status": "ok"}
 
@@ -140,3 +134,6 @@ if __name__ == "__main__":
         port=int(os.getenv("PORT", 8000)),
         log_level="info"
     )
+
+
+# d) Competitor revenue streams        "produce a search query of no more than 10 words to reliably find what revenue streams competitors generate from products "
