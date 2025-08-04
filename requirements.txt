@@ -3,6 +3,7 @@ uvicorn
 python-dotenv
 openai
 langchain
+langchain-community
 serpapi
 google-search-results    # ← required by SerpAPIWrapper
 python-docx
