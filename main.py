@@ -7,21 +7,18 @@ import logging
 import os
 from dotenv import load_dotenv
 
-# Updated LangChain imports
+# LangChain imports (community & OpenAI packages)
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
-# Word document generation
+# Word document creation
 from docx import Document
 
-# SendGrid for email
+# SendGrid email
 from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import (
-    Mail, Attachment, FileContent, FileName,
-    FileType, Disposition
-)
+from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
 import base64
 
 # 1️⃣ Load environment variables
@@ -31,17 +28,17 @@ SENDGRID_SENDER  = os.getenv("SENDGRID_SENDER")
 if not SENDGRID_API_KEY or not SENDGRID_SENDER:
     raise RuntimeError("SENDGRID_API_KEY and SENDGRID_SENDER must be set in .env")
 
-# 2️⃣ Configure logging
+# 2️⃣ Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# 3️⃣ Initialize FastAPI
+# 3️⃣ FastAPI app
 app = FastAPI()
 
-# 4️⃣ Initialize SerpAPI & the Chat LLM
+# 4️⃣ SerpAPI & ChatOpenAI initialization
 serp = SerpAPIWrapper(serpapi_api_key=os.getenv("SERPAPI_API_KEY"))
 llm = ChatOpenAI(
     model_name="gpt-4",
@@ -183,13 +180,15 @@ async def receive_form(request: Request):
 
     logger.info(f"Processing analyses for {email}")
 
-    # Helper to get top-5 snippets, swallowing SerpAPI errors
+    # Helper to get top-5 snippets (handles SerpAPI failures gracefully)
     def get_snippets(chain: LLMChain, text: str) -> str:
+        # refine to query
         try:
-            query = chain.invoke(**{chain.prompt.input_variables[0]: text})
+            query = chain.run(text)
         except Exception as e:
-            logger.warning(f"Query refinement failed: {e}")
+            logger.warning(f"Query refinement failed for '{text}': {e}")
             return ""
+        # fetch results
         try:
             results = serp.run(query)
             return "\n".join(results[:5]) if isinstance(results, list) else str(results)
@@ -204,28 +203,29 @@ async def receive_form(request: Request):
     stats_d = get_snippets(chain_d, features)
 
     # 9️⃣ Generate analyses
-    a_txt = analysis_a.invoke(problem=problem, stats=stats_a)
-    b_txt = analysis_b.invoke(solution=solution, stats=stats_b, trl=trl, features=features)
-    c_txt = analysis_c.invoke(solution=solution, stats=stats_b, revenue=revenue, features=features)
-    d_txt = analysis_d.invoke(solution=solution, stats=stats_d)
-    e_txt = analysis_e.invoke(solution=solution, revenue=revenue, trl=trl)
+    a_txt = analysis_a.run(problem, stats_a)
+    b_txt = analysis_b.run(solution, stats_b, trl, features)
+    c_txt = analysis_c.run(solution, stats_b, revenue, features)
+    d_txt = analysis_d.run(solution, stats_d)
+    e_txt = analysis_e.run(solution, revenue, trl)
 
-    # 10️⃣ Compile into a Word document
+    # 10️⃣ Compile Word document
     doc = Document()
     for title, content in [
         ("The problem/market opportunity", a_txt),
         ("The innovation: Solution/Product or Services (USP)", b_txt),
         ("Market and Competition analysis", c_txt),
         ("Broad impacts", d_txt),
-        ("Funding rationale and MVP", e_txt),
+        ("Funding rationale and MVP", e_txt)
     ]:
         doc.add_heading(title, level=1)
         doc.add_paragraph(content)
+
     filename = "analyses.docx"
     doc.save(filename)
     logger.info(f"Saved document: {filename}")
 
-    # 11️⃣ Email as attachment
+    # 11️⃣ Send email
     with open(filename, "rb") as f:
         data_b64 = base64.b64encode(f.read()).decode()
     message = Mail(
