@@ -1,16 +1,3 @@
-# main.py
-# A simpler, production-ready FastAPI app that:
-# - Receives Fillout webhooks (even if field names aren't exposed)
-# - Crafts focused web search queries with an OpenAI chat model (LangChain)
-# - Runs SerpAPI searches (optional) and builds numbered citations
-# - Generates five 1,500–2,000 char analyses
-# - Produces a .docx with sections + Appendix + References
-# - Emails the document via SendGrid (optional)
-# - Always responds 200 OK to the webhook so Fillout never retries
-#
-# Start command for Railway (Settings -> Start Command):
-#   uvicorn main:app --host 0.0.0.0 --port $PORT
-
 import os
 import re
 import uuid
@@ -72,14 +59,14 @@ QUERY_PROMPT = ChatPromptTemplate.from_messages([
 
 RESEARCH_TASKS = {
     "problem": "Find publicly available statistics quantifying the SCALE and URGENCY of the problem.",
-    "market": "Identify the addressed market, market SIZE (global/regional), and KEY TRENDS.",
-    "novelty": "Find companies with similar features and assess NOVELTY vs existing solutions.",
-    "revenues": "Identify typical REVENUE STREAMS competitors generate from similar products."
+    "market": "Identify the addressed market, market SIZE (global/regional), and all KEY TRENDS.",
+    "novelty": "Find competitive products with similar features and assess degree of NOVELTY vs existing solutions.",
+    "revenues": "Identify typical REVENUE STREAMS key players and startups generate from similar products."
 }
 
 ANALYSIS_PROMPTS = {
     "problem": ChatPromptTemplate.from_messages([
-        ("system", "Write a 1,500–2,000 character, grant-ready analysis with inline numeric evidence and citations [n]. Use only provided notes + user's text."),
+        ("system", "Write a 1,500–2,000 character, in-depth analysis fine-tuned to the standards of VC investors showing the scale and urgency of the problem with inline numeric evidence and citations [n]. Use only provided notes + user's text."),
         ("human",
          "Title: The problem/market opportunity\n\n"
          "User problem description:\n{problem}\n\n"
@@ -87,17 +74,17 @@ ANALYSIS_PROMPTS = {
          "Write 1500–2000 characters. Include concrete figures and cite them inline as [n].")
     ]),
     "innovation": ChatPromptTemplate.from_messages([
-        ("system", "Write a 1,500–2,000 character, grant-ready analysis with citations [n]. Be precise and non-generic."),
+        ("system", "Write a 1,500–2,000 character, in-depth, and unbiased analysis of the degree of novelty that is fine-tuned to the standards of VC investors with citations [n]. Be precise and non-generic."),
         ("human",
          "Title: The innovation: Solution/Product or Services (USP)\n\n"
          "User solution:\n{solution}\n\n"
          "Unique features:\n{features}\n\n"
          "User-stated TRL: {trl}\n\n"
          "Research notes (competitors/validation):\n{notes}\n\n"
-         "Cover: (1) why better than existing solutions; (2) EC TRL and any validation; (3) why now. Cite [n]. 1500–2000 chars.")
+         "Cover: (1) why the features of the innovation make it much better than existing solutions and bring sufficient added value to trigger demand from potential customers; (2) EC TRL and any validation; (3) what latest market, societal or technological trends show now is the right timing to launch the innovation. Cite [n]. 1500–2000 chars.")
     ]),
     "market": ChatPromptTemplate.from_messages([
-        ("system", "Write a 1,500–2,000 character market analysis with citations [n]."),
+        ("system", "Write a 1,500–2,000 character unbiased market analysis fine-tuned to the standards of VC investors with citations [n]."),
         ("human",
          "Title: Market and Competition analysis\n\n"
          "User solution:\n{solution}\n\n"
@@ -106,7 +93,7 @@ ANALYSIS_PROMPTS = {
          "Research notes (market size & trends):\n{market_notes}\n\n"
          "Research notes (competitors & novelty):\n{novelty_notes}\n\n"
          "Research notes (competitor revenues):\n{rev_notes}\n\n"
-         "Cover: (i) size & trends; (ii) transformative potential; (iii) business model & revenue; (iv) why features drive adoption; (v) pros/cons & success factors. Cite [n]. 1500–2000 chars.")
+         "Cover: (i) market size & trends; (ii) potential of the innovation to transform the market; (iii) optimal business model & revenue model; (iv) why the innovative features of the innovation drive adoption; (v) pros/cons of the innovation & why it is likely to succeed. Cite [n]. 1500–2000 chars.")
     ]),
     "impact": ChatPromptTemplate.from_messages([
         ("system", "Write a 1,500–2,000 character impacts analysis with citations [n]."),
@@ -123,7 +110,7 @@ ANALYSIS_PROMPTS = {
          "User solution:\n{solution}\n\n"
          "User-stated TRL: {trl}\n\n"
          "User revenue ideas:\n{revenue}\n\n"
-         "Explain why funding is hard at this TRL per EC definitions, why MVP is crucial now, and include any user-provided funding history if present. 1500–2000 chars.")
+         "Explain why funding is hard at this TRL per EC definitions, why MVP is crucial now, and why it will enable successful fundraising . 1500–2000 chars.")
     ])
 }
 
