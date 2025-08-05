@@ -1,12 +1,10 @@
-fastapi
-uvicorn
-python-dotenv
-openai
-langchain
-langchain-community
-langchain-openai
-serpapi
-google-search-results    # ← required by SerpAPIWrapper
-python-docx
-requests
-sendgrid
+fastapi>=0.112
+uvicorn[standard]>=0.30
+python-dotenv>=1.0
+langchain>=0.2.12
+langchain-openai>=0.1.23
+langchain-community>=0.2.10
+pydantic>=2.7
+python-docx>=1.1.2
+sendgrid>=6.11
+google-search-results>=2.4.2
