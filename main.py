@@ -7,16 +7,14 @@ import logging
 import os
 from dotenv import load_dotenv
 
-# LangChain imports
-from langchain.utilities import SerpAPIWrapper
-from langchain.chat_models import ChatOpenAI
+# SerpAPI wrapper from community package
+from langchain_community.utilities import SerpAPIWrapper
+# ChatOpenAI from langchain-openai package
+from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
-# Document generation
 from docx import Document
-
-# Email sending via SendGrid
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
 import base64
@@ -29,10 +27,7 @@ if not SENDGRID_API_KEY or not SENDGRID_SENDER:
     raise RuntimeError("SENDGRID_API_KEY and SENDGRID_SENDER must be set in .env")
 
 # 2️⃣ Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 # 3️⃣ Initialize FastAPI
@@ -47,156 +42,105 @@ llm = ChatOpenAI(
     max_tokens=2048
 )
 
-# Utility to create chains
-def make_chain(template: PromptTemplate) -> LLMChain:
-    return LLMChain(llm=llm, prompt=template)
+# Utility to create LLMChains
+def make_chain(prompt: PromptTemplate) -> LLMChain:
+    return LLMChain(llm=llm, prompt=prompt)
 
-# 5️⃣ PromptTemplates & Chains
-chain_a = make_chain(PromptTemplate(
-    input_variables=["problem_text"],
-    template="""
-Generate a concise search query to find publicly available statistics illustrating the scale and urgency of this problem.
+# 5️⃣ Define query-refinement chains
+a_query = make_chain(PromptTemplate(
+    input_variables=["text"],
+    template="Generate a concise search query to find statistics illustrating the scale and urgency of this problem.\n\n{text}"))
+b_query = make_chain(PromptTemplate(
+    input_variables=["text"],
+    template="Generate a search query to find market size and key trends for this product.\n\n{text}"))
+c_query = make_chain(PromptTemplate(
+    input_variables=["text"],
+    template="Generate a search query to identify competitors with similar features {text} and assess novelty."))
+d_query = make_chain(PromptTemplate(
+    input_variables=["text"],
+    template="Generate a search query to find competitor revenue streams for products with features {text}."))
 
-Problem: {problem_text}
-
-Search Query:
-"""
-))
-chain_b = make_chain(PromptTemplate(
-    input_variables=["solution_text"],
-    template="""
-Generate a concise search query to find the market addressed by this product, including market size and key trends.
-
-Product: {solution_text}
-
-Search Query:
-"""
-))
-chain_c = make_chain(PromptTemplate(
-    input_variables=["features_text"],
-    template="""
-Generate a concise search query to identify companies offering similar features and assess the degree of novelty.
-
-Features: {features_text}
-
-Search Query:
-"""
-))
-chain_d = make_chain(PromptTemplate(
-    input_variables=["features_text"],
-    template="""
-Generate a concise search query to find revenue streams competitors derive from products with similar features.
-
-Features: {features_text}
-
-Search Query:
-"""
-))
-
-analysis_a_chain = make_chain(PromptTemplate(
-    input_variables=["problem_text","search_results"],
+# 6️⃣ Define analysis chains
+a_chain = make_chain(PromptTemplate(
+    input_variables=["problem","stats"],
     template="""
 Draft a 1500–2000 character analysis titled "The problem/market opportunity".
-
-Use the user’s problem description:
-{problem_text}
-
-Incorporate these statistics/snippets:
-{search_results}
-
-Substantiate with concrete data illustrating scale and urgency. Do NOT truncate mid-sentence.
-"""
-))
-analysis_b_chain = make_chain(PromptTemplate(
-    input_variables=["solution_text","search_results","trl","features_text"],
+Use problem: {problem} and stats: {stats}. Do NOT truncate.
+"""))
+b_chain = make_chain(PromptTemplate(
+    input_variables=["solution","stats","trl","features"],
     template="""
 Draft a 1500–2000 character analysis titled "The innovation: Solution/Product or Services (USP)".
-
-1. Why this product is better than existing solutions (use: {search_results}).
-2. Current TRL: {trl}, include validation/certification details.
-3. Why now is the right time to bring this product to market.
-
-Unique features: {features_text}
-Do NOT truncate mid-sentence.
-"""
-))
-analysis_c_chain = make_chain(PromptTemplate(
-    input_variables=["solution_text","search_results","revenue_model","features_text"],
+Use solution: {solution}, stats: {stats}, TRL: {trl}, features: {features}. Do NOT truncate.
+"""))
+c_chain = make_chain(PromptTemplate(
+    input_variables=["solution","stats","revenue","features"],
     template="""
 Draft a 1500–2000 character analysis titled "Market and Competition analysis".
-
-1. Market size & key trends (use: {search_results}).
-2. Product potential to transform/create market.
-3. Business model & revenue streams: {revenue_model}.
-4. Why features {features_text} will drive adoption.
-5. Advantages/disadvantages & success factors.
-Do NOT truncate mid-sentence.
-"""
-))
-analysis_d_chain = make_chain(PromptTemplate(
-    input_variables=["solution_text","search_results"],
+Use solution: {solution}, stats: {stats}, revenue: {revenue}, features: {features}. Do NOT truncate.
+"""))
+d_chain = make_chain(PromptTemplate(
+    input_variables=["solution","stats"],
     template="""
 Draft a 1500–2000 character analysis titled "Broad impacts".
-
-Discuss societal, environmental, or climate impacts and estimate job creation. Use:
-{search_results}
-Do NOT truncate mid-sentence.
-"""
-))
-analysis_e_chain = make_chain(PromptTemplate(
-    input_variables=["solution_text","revenue_model","trl"],
+Use solution: {solution}, stats: {stats}. Do NOT truncate.
+"""))
+e_chain = make_chain(PromptTemplate(
+    input_variables=["solution","revenue","trl"],
     template="""
 Draft a 1500–2000 character analysis titled "Funding rationale and MVP".
-
-Explain why raising funding is nearly impossible at TRL {trl}, why an MVP is crucial, and include any funding history if provided.
-Use: {revenue_model}
-Do NOT truncate mid-sentence.
-"""
-))
+Use solution: {solution}, revenue: {revenue}, TRL: {trl}. Do NOT truncate.
+"""))
 
 @app.post("/webhook")
 async def receive_form(request: Request):
-    payload = await request.json()
-    qs = payload.get("submission", {}).get("questions", [])
+    data = await request.json()
+    questions = data.get("submission", {}).get("questions", [])
+    if not questions:
+        return JSONResponse(status_code=400, content={"detail": "No form data received."})
+
     # Map question names to values
-    answers = {q.get("name"): q.get("value") for q in qs}
+    field_map = {q.get("name", "").lower(): q.get("value", "").strip() for q in questions}
+    def get_field(keyword: str):
+        for k, v in field_map.items():
+            if keyword in k:
+                return v
+        return ""
 
-    # Required fields by label
-    try:
-        solution = answers["Describe your solution"]
-        problem = answers["What problem does it solve?"]
-        features = answers["Unique features of your solution"]
-        trl = answers["Current Technology Readiness Level (TRL)"]
-        revenue_model = answers["Envisioned revenue streams"]
-        user_email = answers["Your email address"]
-        consent = answers.get("I consent to data processing in compliance with GDPR")
-    except KeyError as e:
-        return JSONResponse(status_code=400, content={"detail": f"Missing field: {e}"})
+    solution = get_field("solution")
+    problem = get_field("problem")
+    features = get_field("unique")
+    trl = get_field("trl")
+    revenue = get_field("revenue")
+    email = get_field("email")
 
-    # Validate consent
-    if consent not in [True, "true", "True", "on", "yes", "Yes"]:
-        return JSONResponse(status_code=400, content={"detail": "Consent is required to proceed."})
+    missing = [name for name, val in [("solution", solution), ("problem", problem), ("features", features), ("trl", trl), ("revenue", revenue), ("email", email)] if not val]
+    if missing:
+        return JSONResponse(status_code=400, content={"detail": f"Missing fields: {', '.join(missing)}"})
 
-    logger.info(f"Processing for email: {user_email}")
+    logger.info(f"Fields OK; processing for email: {email}")
 
-    # Generate snippets
+    # Build search snippets
     def snippet(chain, text):
-        query = chain.run(**{chain.prompt.input_variables[0]: text})
-        results = serp.run(query)
-        return "\n".join(results[:5]) if isinstance(results, list) else str(results)
+        query = chain.run(text=text)
+        res = serp.run(query)
+        return "\n".join(res[:5]) if isinstance(res, list) else str(res)
 
-    s_a, s_b, s_c, s_d = snippet(chain_a, problem), snippet(chain_b, solution), snippet(chain_c, features), snippet(chain_d, features)
+    stats_a = snippet(a_query, problem)
+    stats_b = snippet(b_query, solution)
+    stats_c = snippet(c_query, features)
+    stats_d = snippet(d_query, features)
 
     # Generate analyses
-    a = analysis_a_chain.run(problem_text=problem, search_results=s_a)
-    b = analysis_b_chain.run(solution_text=solution, search_results=s_b, trl=trl, features_text=features)
-    c = analysis_c_chain.run(solution_text=solution, search_results=s_b, revenue_model=revenue_model, features_text=features)
-    d = analysis_d_chain.run(solution_text=solution, search_results=s_d)
-    e = analysis_e_chain.run(solution_text=solution, revenue_model=revenue_model, trl=trl)
+    a = a_chain.run(problem=problem, stats=stats_a)
+    b = b_chain.run(solution=solution, stats=stats_b, trl=trl, features=features)
+    c = c_chain.run(solution=solution, stats=stats_b, revenue=revenue, features=features)
+    d = d_chain.run(solution=solution, stats=stats_d)
+    e = e_chain.run(solution=solution, revenue=revenue, trl=trl)
 
-    # Compile document
+    # Compile Word document
     doc = Document()
-    for title, txt in [
+    for title, content in [
         ("The problem/market opportunity", a),
         ("The innovation: Solution/Product or Services (USP)", b),
         ("Market and Competition analysis", c),
@@ -204,30 +148,31 @@ async def receive_form(request: Request):
         ("Funding rationale and MVP", e)
     ]:
         doc.add_heading(title, level=1)
-        doc.add_paragraph(txt)
+        doc.add_paragraph(content)
     filename = "analyses.docx"
     doc.save(filename)
-    logger.info(f"Saved document {filename}")
+    logger.info("Document saved: %s", filename)
 
-    # Email document
+    # Email attachment via SendGrid
     with open(filename, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
-    message = Mail(
+        data_enc = base64.b64encode(f.read()).decode()
+    mail = Mail(
         from_email=SENDGRID_SENDER,
-        to_emails=user_email,
+        to_emails=email,
         subject="Your AI-Generated Analyses",
-        html_content="<p>Please find the attached analyses document.</p>"
+        html_content="<p>Your analyses are attached.</p>"
     )
     attach = Attachment(
-        FileContent(encoded),
+        FileContent(data_enc),
         FileName(filename),
         FileType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         Disposition("attachment")
     )
-    message.attachment = attach
-    resp = SendGridAPIClient(SENDGRID_API_KEY).send(message)
-    logger.info(f"Email sent status {resp.status_code}")
+    mail.attachment = attach
+    resp = SendGridAPIClient(SENDGRID_API_KEY).send(mail)
+    logger.info(f"Email sent; status {resp.status_code}")
 
+    # Return response
     download_url = request.url._url.rstrip(request.url.path) + "/download"
     return {"status": "ok", "email_status": resp.status_code, "download_url": download_url}
 
@@ -236,7 +181,11 @@ async def download_doc():
     path = os.path.join(os.getcwd(), "analyses.docx")
     if not os.path.exists(path):
         return JSONResponse(status_code=404, content={"detail": "Document not found"})
-    return FileResponse(path=path, filename="analyses.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    return FileResponse(
+        path=path,
+        filename="analyses.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)), log_level="info")

@@ -4,6 +4,7 @@ python-dotenv
 openai
 langchain
 langchain-community
+langchain-openai
 serpapi
 google-search-results    # ← required by SerpAPIWrapper
 python-docx
