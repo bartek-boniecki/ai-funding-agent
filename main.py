@@ -7,18 +7,21 @@ import logging
 import os
 from dotenv import load_dotenv
 
-# LangChain imports (up-to-date)
+# Updated LangChain imports
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
-# Document generation
+# Word document generation
 from docx import Document
 
-# SendGrid email
+# SendGrid for email
 from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+from sendgrid.helpers.mail import (
+    Mail, Attachment, FileContent, FileName,
+    FileType, Disposition
+)
 import base64
 
 # 1️⃣ Load environment variables
@@ -35,10 +38,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 3️⃣ Initialize FastAPI app
+# 3️⃣ Initialize FastAPI
 app = FastAPI()
 
-# 4️⃣ Initialize SerpAPI and ChatOpenAI
+# 4️⃣ Initialize SerpAPI & the Chat LLM
 serp = SerpAPIWrapper(serpapi_api_key=os.getenv("SERPAPI_API_KEY"))
 llm = ChatOpenAI(
     model_name="gpt-4",
@@ -47,12 +50,11 @@ llm = ChatOpenAI(
     max_tokens=2048
 )
 
-# Helper to build chains
+# Helper to build LLMChains
 def make_chain(template: PromptTemplate) -> LLMChain:
     return LLMChain(llm=llm, prompt=template)
 
-# 5️⃣ Query‐refinement chains
-
+# 5️⃣ Query-refinement chains
 chain_a = make_chain(PromptTemplate(
     input_variables=["text"],
     template="""
@@ -64,7 +66,6 @@ Problem: {text}
 Search Query:
 """
 ))
-
 chain_b = make_chain(PromptTemplate(
     input_variables=["text"],
     template="""
@@ -76,7 +77,6 @@ Product: {text}
 Search Query:
 """
 ))
-
 chain_c = make_chain(PromptTemplate(
     input_variables=["text"],
     template="""
@@ -88,7 +88,6 @@ Features: {text}
 Search Query:
 """
 ))
-
 chain_d = make_chain(PromptTemplate(
     input_variables=["text"],
     template="""
@@ -102,7 +101,6 @@ Search Query:
 ))
 
 # 6️⃣ Analysis chains
-
 analysis_a = make_chain(PromptTemplate(
     input_variables=["problem", "stats"],
     template="""
@@ -117,7 +115,6 @@ Statistics/snippets:
 Substantiate with concrete data illustrating scale and urgency. Do NOT truncate mid-sentence.
 """
 ))
-
 analysis_b = make_chain(PromptTemplate(
     input_variables=["solution", "stats", "trl", "features"],
     template="""
@@ -131,7 +128,6 @@ Unique features: {features}
 Do NOT truncate mid-sentence.
 """
 ))
-
 analysis_c = make_chain(PromptTemplate(
     input_variables=["solution", "stats", "revenue", "features"],
     template="""
@@ -142,20 +138,19 @@ Draft a 1500–2000 character analysis titled "Market and Competition analysis".
 3. Business model & revenue streams: {revenue}.
 4. Why features {features} will drive adoption.
 5. Advantages/disadvantages & success factors.
+
 Do NOT truncate mid-sentence.
 """
 ))
-
 analysis_d = make_chain(PromptTemplate(
     input_variables=["solution", "stats"],
     template="""
 Draft a 1500–2000 character analysis titled "Broad impacts".
 
-Discuss potential societal, environmental, or climate impacts and estimate job creation (use: {stats}).
-Do NOT truncate mid-sentence.
+Discuss potential societal, environmental, or climate impacts and estimate job creation
+(use: {stats}). Do NOT truncate mid-sentence.
 """
 ))
-
 analysis_e = make_chain(PromptTemplate(
     input_variables=["solution", "revenue", "trl"],
     template="""
@@ -171,51 +166,51 @@ Do NOT truncate mid-sentence.
 
 @app.post("/webhook")
 async def receive_form(request: Request):
-    data = await request.json()
-    qs = data.get("submission", {}).get("questions", [])
+    payload = await request.json()
+    qs = payload.get("submission", {}).get("questions", [])
     if len(qs) < 6:
-        raise HTTPException(status_code=400, detail="Form must include 5 answers plus email")
+        raise HTTPException(status_code=400, detail="Form must include 5 answers plus an email field")
 
-    # 7️⃣ Extract form fields
+    # 7️⃣ Extract inputs
     solution = qs[0].get("value", "").strip()
     problem  = qs[1].get("value", "").strip()
     features = qs[2].get("value", "").strip()
     trl      = qs[3].get("value", "").strip()
     revenue  = qs[4].get("value", "").strip()
     email    = qs[5].get("value", "").strip()
-
     if not email:
         raise HTTPException(status_code=400, detail="Email address is required")
 
     logger.info(f"Processing analyses for {email}")
 
-    # 8️⃣ Helper to get top-5 snippets
+    # Helper to get top-5 snippets, swallowing SerpAPI errors
     def get_snippets(chain: LLMChain, text: str) -> str:
-        query = chain.run(**{chain.prompt.input_variables[0]: text})
-        results = serp.run(query)
-        return "\n".join(results[:5]) if isinstance(results, list) else str(results)
+        try:
+            query = chain.invoke(**{chain.prompt.input_variables[0]: text})
+        except Exception as e:
+            logger.warning(f"Query refinement failed: {e}")
+            return ""
+        try:
+            results = serp.run(query)
+            return "\n".join(results[:5]) if isinstance(results, list) else str(results)
+        except Exception as e:
+            logger.warning(f"SerpAPI search failed for '{query}': {e}")
+            return ""
 
-    try:
-        stats_a = get_snippets(chain_a, problem)
-        stats_b = get_snippets(chain_b, solution)
-        stats_c = get_snippets(chain_c, features)
-        stats_d = get_snippets(chain_d, features)
-    except Exception as e:
-        logger.error(f"Web search failed: {e}")
-        raise HTTPException(status_code=500, detail="Web search failed")
+    # 8️⃣ Gather snippets
+    stats_a = get_snippets(chain_a, problem)
+    stats_b = get_snippets(chain_b, solution)
+    stats_c = get_snippets(chain_c, features)
+    stats_d = get_snippets(chain_d, features)
 
     # 9️⃣ Generate analyses
-    try:
-        a_txt = analysis_a.run(problem=problem, stats=stats_a)
-        b_txt = analysis_b.run(solution=solution, stats=stats_b, trl=trl, features=features)
-        c_txt = analysis_c.run(solution=solution, stats=stats_b, revenue=revenue, features=features)
-        d_txt = analysis_d.run(solution=solution, stats=stats_d)
-        e_txt = analysis_e.run(solution=solution, revenue=revenue, trl=trl)
-    except Exception as e:
-        logger.error(f"Analysis generation failed: {e}")
-        raise HTTPException(status_code=500, detail="Analysis generation failed")
+    a_txt = analysis_a.invoke(problem=problem, stats=stats_a)
+    b_txt = analysis_b.invoke(solution=solution, stats=stats_b, trl=trl, features=features)
+    c_txt = analysis_c.invoke(solution=solution, stats=stats_b, revenue=revenue, features=features)
+    d_txt = analysis_d.invoke(solution=solution, stats=stats_d)
+    e_txt = analysis_e.invoke(solution=solution, revenue=revenue, trl=trl)
 
-    # 10️⃣ Compile into Word document
+    # 10️⃣ Compile into a Word document
     doc = Document()
     for title, content in [
         ("The problem/market opportunity", a_txt),
@@ -226,33 +221,28 @@ async def receive_form(request: Request):
     ]:
         doc.add_heading(title, level=1)
         doc.add_paragraph(content)
-
     filename = "analyses.docx"
     doc.save(filename)
     logger.info(f"Saved document: {filename}")
 
     # 11️⃣ Email as attachment
-    try:
-        with open(filename, "rb") as f:
-            data_b64 = base64.b64encode(f.read()).decode()
-        message = Mail(
-            from_email=SENDGRID_SENDER,
-            to_emails=email,
-            subject="Your AI-Generated Analyses",
-            html_content="<p>Please find attached your analyses document.</p>"
-        )
-        attachment = Attachment(
-            FileContent(data_b64),
-            FileName(filename),
-            FileType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-            Disposition("attachment")
-        )
-        message.attachment = attachment
-        resp = SendGridAPIClient(SENDGRID_API_KEY).send(message)
-        logger.info(f"Email sent; status code: {resp.status_code}")
-    except Exception as e:
-        logger.error(f"Email send failed: {e}")
-        raise HTTPException(status_code=500, detail="Email sending failed")
+    with open(filename, "rb") as f:
+        data_b64 = base64.b64encode(f.read()).decode()
+    message = Mail(
+        from_email=SENDGRID_SENDER,
+        to_emails=email,
+        subject="Your AI-Generated Analyses",
+        html_content="<p>Please find attached your analyses document.</p>"
+    )
+    attachment = Attachment(
+        FileContent(data_b64),
+        FileName(filename),
+        FileType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        Disposition("attachment")
+    )
+    message.attachment = attachment
+    resp = SendGridAPIClient(SENDGRID_API_KEY).send(message)
+    logger.info(f"Email sent; status code: {resp.status_code}")
 
     # 12️⃣ Return success
     download_url = request.url._url.rstrip(request.url.path) + "/download"
