@@ -16,6 +16,11 @@ from langchain.chains import LLMChain
 # Document generation
 from docx import Document
 
+# Email sending via SendGrid
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+import base64
+
 # 1️⃣ Load environment variables
 load_dotenv()
 
@@ -36,7 +41,6 @@ llm = ChatOpenAI(
 )
 
 # 5️⃣ Query-refinement chains
-# a) Scale & urgency of the problem
 template_a = PromptTemplate(
     input_variables=["problem_text"],
     template=(
@@ -48,7 +52,6 @@ template_a = PromptTemplate(
 )
 chain_a = LLMChain(llm=llm, prompt=template_a)
 
-# b) Market size & key trends
 template_b = PromptTemplate(
     input_variables=["solution_text"],
     template=(
@@ -60,7 +63,6 @@ template_b = PromptTemplate(
 )
 chain_b = LLMChain(llm=llm, prompt=template_b)
 
-# c) Competitors & novelty
 template_c = PromptTemplate(
     input_variables=["features_text"],
     template=(
@@ -72,7 +74,6 @@ template_c = PromptTemplate(
 )
 chain_c = LLMChain(llm=llm, prompt=template_c)
 
-# d) Competitor revenue streams
 template_d = PromptTemplate(
     input_variables=["features_text"],
     template=(
@@ -85,7 +86,6 @@ template_d = PromptTemplate(
 chain_d = LLMChain(llm=llm, prompt=template_d)
 
 # 6️⃣ Analysis chains
-# a) The problem/market opportunity
 analysis_template_a = PromptTemplate(
     input_variables=["problem_text","search_results"],
     template=(
@@ -97,7 +97,6 @@ analysis_template_a = PromptTemplate(
 )
 analysis_chain_a = LLMChain(llm=llm, prompt=analysis_template_a)
 
-# b) The innovation: USP
 analysis_template_b = PromptTemplate(
     input_variables=["solution_text","search_results","trl","features_text"],
     template=(
@@ -110,7 +109,6 @@ analysis_template_b = PromptTemplate(
 )
 analysis_chain_b = LLMChain(llm=llm, prompt=analysis_template_b)
 
-# c) Market and Competition analysis
 analysis_template_c = PromptTemplate(
     input_variables=["solution_text","search_results","revenue_model","features_text"],
     template=(
@@ -125,7 +123,6 @@ analysis_template_c = PromptTemplate(
 )
 analysis_chain_c = LLMChain(llm=llm, prompt=analysis_template_c)
 
-# d) Broad impacts
 analysis_template_d = PromptTemplate(
     input_variables=["solution_text","search_results"],
     template=(
@@ -136,7 +133,6 @@ analysis_template_d = PromptTemplate(
 )
 analysis_chain_d = LLMChain(llm=llm, prompt=analysis_template_d)
 
-# e) Funding rationale and MVP
 analysis_template_e = PromptTemplate(
     input_variables=["solution_text","revenue_model","trl"],
     template=(
@@ -153,36 +149,29 @@ async def receive_form(request: Request):
     payload = await request.json()
     questions = payload.get("submission", {}).get("questions", [])
 
-    # 7️⃣ Extract form inputs
+    # 7️⃣ Extract form inputs + user email
     solution = questions[0].get("value", "") if len(questions) > 0 else ""
     problem = questions[1].get("value", "") if len(questions) > 1 else ""
     unique_feature = questions[2].get("value", "") if len(questions) > 2 else ""
     current_trl = questions[3].get("value", "") if len(questions) > 3 else ""
     revenue_model = questions[4].get("value", "") if len(questions) > 4 else ""
-    logger.info("Inputs received: %s | %s | %s | %s | %s", solution, problem, unique_feature, current_trl, revenue_model)
+    user_email = questions[5].get("value", "") if len(questions) > 5 else ""
+    logger.info("Inputs: %s | %s | %s | %s | %s | Email: %s", solution, problem, unique_feature, current_trl, revenue_model, user_email)
 
     # 8️⃣ Perform queries and gather snippets
-    # a) problem\    
     query_a = chain_a.run(problem_text=problem)
-    results_a = serp.run(query_a)
-    snippets_a = "\n".join(results_a[:5]) if isinstance(results_a, list) else str(results_a)
+    snippets_a = "\n".join(serp.run(query_a)[:5])
 
-    # b) market
     query_b = chain_b.run(solution_text=solution)
-    results_b = serp.run(query_b)
-    snippets_b = "\n".join(results_b[:5]) if isinstance(results_b, list) else str(results_b)
+    snippets_b = "\n".join(serp.run(query_b)[:5])
 
-    # c) competitors
     query_c = chain_c.run(features_text=unique_feature)
-    results_c = serp.run(query_c)
-    snippets_c = "\n".join(results_c[:5]) if isinstance(results_c, list) else str(results_c)
+    snippets_c = "\n".join(serp.run(query_c)[:5])
 
-    # d) revenue streams
     query_d = chain_d.run(features_text=unique_feature)
-    results_d = serp.run(query_d)
-    snippets_d = "\n".join(results_d[:5]) if isinstance(results_d, list) else str(results_d)
+    snippets_d = "\n".join(serp.run(query_d)[:5])
 
-    # 9️⃣ Generate analyses a–e
+    # 9️⃣ Generate analyses
     analysis_a = analysis_chain_a.run(problem_text=problem, search_results=snippets_a)
     analysis_b = analysis_chain_b.run(solution_text=solution, search_results=snippets_b, trl=current_trl, features_text=unique_feature)
     analysis_c = analysis_chain_c.run(solution_text=solution, search_results=snippets_b, revenue_model=revenue_model, features_text=unique_feature)
@@ -191,35 +180,45 @@ async def receive_form(request: Request):
 
     # 10️⃣ Compile into Word document
     doc = Document()
-    sections = [
+    for title, content in [
         ("The problem/market opportunity", analysis_a),
         ("The innovation: Solution/Product or Services (USP)", analysis_b),
         ("Market and Competition analysis", analysis_c),
         ("Broad impacts", analysis_d),
         ("Funding rationale and MVP", analysis_e)
-    ]
-    for title, text in sections:
+    ]:
         doc.add_heading(title, level=1)
-        doc.add_paragraph(text)
-
+        doc.add_paragraph(content)
     output_filename = "analyses.docx"
     doc.save(output_filename)
     logger.info("Document saved to %s", output_filename)
 
-    # 11️⃣ Return download URL
-    base_url = request.url._url.rstrip(request.url.path)
-    download_url = f"{base_url}/download"
-    logger.info("Download URL: %s", download_url)
-    return {"status": "ok", "download_url": download_url}
+    # 11️⃣ Email the document as attachment
+    with open(output_filename, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode()
+    message = Mail(
+        from_email=os.getenv("SENDGRID_SENDER"),
+        to_emails=user_email,
+        subject="Your AI-generated analyses",
+        html_content="<p>Please find attached your analyses document.</p>"
+    )
+    attachment = Attachment(
+        FileContent(encoded),
+        FileName(output_filename),
+        FileType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        Disposition("attachment")
+    )
+    message.attachment = attachment
+    sg = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
+    response = sg.send(message)
+    logger.info("Email sent status: %s", response.status_code)
+
+    # 12️⃣ Return download and email status
+    return {"status": "ok", "email_status": response.status_code}
 
 @app.get("/download")
 async def download_document():
-    file_path = os.path.join(os.getcwd(), "analyses.docx")
-    return FileResponse(
-        path=file_path,
-        filename="analyses.docx",
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+    return FileResponse(path=os.path.join(os.getcwd(), "analyses.docx"), filename="analyses.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)), log_level="info")

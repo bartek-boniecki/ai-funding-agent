@@ -8,3 +8,4 @@ serpapi
 google-search-results    # ← required by SerpAPIWrapper
 python-docx
 requests
+sendgrid
